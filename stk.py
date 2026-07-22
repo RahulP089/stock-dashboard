@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 # Page Configuration
 st.set_page_config(page_title="Advanced Stock Dashboard", page_icon="⚡", layout="wide")
@@ -165,8 +166,7 @@ if company:
     # ==========================
     news_list = ticker.news
     bullish_words = ["buy", "profit", "rise", "growth", "boost", "charter", "tender", "expand", "record", "gain"]
-    bearish_words = ["war", "blockade", "cost", "risk", "fall", "decline", "probe", "loss", "penalty", "cut", "crisis",
-                     "scam"]
+    bearish_words = ["war", "blockade", "cost", "risk", "fall", "decline", "probe", "loss", "penalty", "cut", "crisis", "scam"]
 
     news_summaries = []
     bullish_count, bearish_count = 0, 0
@@ -334,19 +334,46 @@ if company:
         else:
             st.write("No recent news stories found for this symbol.")
 
-    # Interactive Chart
+    # Interactive Chart with Subplots for RSI
     st.markdown("---")
-    st.subheader(f"📉 Technical Chart ({selected_timeframe_label})")
+    
+    # Create subplots: Row 1 for Candlestick + MAs, Row 2 for RSI
+    fig = make_subplots(
+        rows=2, cols=1, 
+        shared_xaxes=True, 
+        vertical_spacing=0.03, 
+        row_heights=[0.7, 0.3],
+        subplot_titles=(f"📉 Technical Chart ({selected_timeframe_label})", "RSI (14)")
+    )
 
-    fig = go.Figure()
-    fig.add_trace(go.Candlestick(x=data_horizon.index, open=data_horizon["Open"], high=data_horizon["High"],
-                                 low=data_horizon["Low"], close=data_horizon["Close"], name="Price"))
-    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["MA20"], mode="lines", name="MA20"))
-    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["MA50"], mode="lines", name="MA50"))
-    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["BB_Upper"], mode="lines", name="BB Upper",
-                             line=dict(dash='dash', color='gray')))
-    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["BB_Lower"], mode="lines", name="BB Lower",
-                             line=dict(dash='dash', color='gray')))
+    # 1. Main Price Chart
+    fig.add_trace(go.Candlestick(
+        x=data_horizon.index, open=data_horizon["Open"], high=data_horizon["High"],
+        low=data_horizon["Low"], close=data_horizon["Close"], name="Price"
+    ), row=1, col=1)
+    
+    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["MA20"], mode="lines", name="MA20", line=dict(color='blue')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["MA50"], mode="lines", name="MA50", line=dict(color='orange')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["BB_Upper"], mode="lines", name="BB Upper", line=dict(dash='dash', color='gray')), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["BB_Lower"], mode="lines", name="BB Lower", line=dict(dash='dash', color='gray')), row=1, col=1)
 
-    fig.update_layout(template="plotly_dark", height=500, xaxis_rangeslider_visible=False)
+    # 2. RSI Subplot
+    fig.add_trace(go.Scatter(
+        x=data_horizon.index, y=data_horizon["RSI"], mode="lines", name="RSI", line=dict(color='purple')
+    ), row=2, col=1)
+
+    # Add RSI Overbought/Oversold thresholds
+    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1, annotation_text="Overbought (70)", annotation_position="bottom right")
+    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1, annotation_text="Oversold (30)", annotation_position="top right")
+
+    # Update Layout
+    fig.update_layout(
+        template="plotly_dark", 
+        height=700, # Increased height to accommodate the subplot
+        xaxis_rangeslider_visible=False,
+        xaxis2_rangeslider_visible=False,
+        showlegend=True,
+        margin=dict(l=20, r=20, t=40, b=20)
+    )
+    
     st.plotly_chart(fig, use_container_width=True)
