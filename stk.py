@@ -129,12 +129,27 @@ if company:
     cmp_target_price_1000 = current_price + (1000 / cmp_shares) if cmp_shares > 0 else current_price
     req_move_pct = ((cmp_target_price_1000 - current_price) / current_price) * 100 if current_price > 0 else 0
 
-    # SAFE DIP PRICE LOGIC
-    # Calculates a safe entry point using MA20 or lower support levels if price is extended
-    if current_price > ma20:
-        safe_entry_price = ma20  # Pullback to 20-day moving average
-    else:
-        safe_entry_price = max(bb_lower, current_price * 0.98)  # Support near lower Bollinger Band
+    # SAFE DIP PRICE LOGIC (Enhanced with RSI)
+    if rsi > 70:
+        # Overbought: High risk of pullback. Wait for deeper support.
+        safe_entry_price = ma50 if current_price > ma50 else bb_lower
+        rsi_entry_eval = "Overbought (>70). High risk of immediate pullback. Wait for deeper structural support."
+    elif rsi < 30:
+        # Oversold: Price is already stretched downward.
+        safe_entry_price = current_price  # Current price is considered a safe entry
+        rsi_entry_eval = "Oversold (<30). Price is already stretched downward; excellent momentum for a rebound."
+    elif 30 <= rsi <= 45:
+        # Nearing oversold
+        safe_entry_price = max(bb_lower, current_price * 0.98)
+        rsi_entry_eval = "Approaching Oversold. Good dip entry zone near structural support limits."
+    else: 
+        # Neutral to bullish (45-70)
+        if current_price > ma20:
+            safe_entry_price = ma20
+            rsi_entry_eval = "Neutral/Bullish. Entering at the 20-Day MA pullback is the most logical support."
+        else:
+            safe_entry_price = max(bb_lower, current_price * 0.98)
+            rsi_entry_eval = "Neutral. Price is below MA20, lower Bollinger Band provides the next safe entry."
 
     safe_shares = int(investment // safe_entry_price) if safe_entry_price > 0 else cmp_shares
     safe_target_price_1000 = safe_entry_price + (1000 / safe_shares) if safe_shares > 0 else cmp_target_price_1000
@@ -270,6 +285,8 @@ if company:
     entry_col2.metric("SAFE DIP BUY PRICE", f"₹{safe_entry_price:.2f}", f"-{safe_dip_discount_pct:.2f}% Dip")
     entry_col3.metric("Target Exit (₹1,000 Profit)", f"₹{safe_target_price_1000:.2f}")
     entry_col4.metric("Strict Stop Loss", f"₹{stop_loss_price:.2f}")
+    
+    st.caption(f"📈 **RSI Entry Evaluation:** {rsi_entry_eval} (Current RSI: {rsi:.2f})")
 
     if current_price <= (safe_entry_price * 1.005):
         st.success(
@@ -369,7 +386,7 @@ if company:
     # Update Layout
     fig.update_layout(
         template="plotly_dark", 
-        height=700, # Increased height to accommodate the subplot
+        height=700, 
         xaxis_rangeslider_visible=False,
         xaxis2_rangeslider_visible=False,
         showlegend=True,
