@@ -115,6 +115,29 @@ if company:
     current_vol = float(data_horizon["Volume"].iloc[-1])
     vol_ma20 = float(data_horizon["Vol_MA20"].iloc[-1])
 
+    # ==========================================
+    # NEW: CURRENT DAY EXPECTED HIGH & LOW
+    # ==========================================
+    if len(full_data) >= 2:
+        prev_high = float(full_data["High"].iloc[-2])
+        prev_low = float(full_data["Low"].iloc[-2])
+        prev_close = float(full_data["Close"].iloc[-2])
+    else:
+        prev_high, prev_low, prev_close = current_price, current_price, current_price
+
+    # Pivot Point Method (Classic)
+    pivot_point = (prev_high + prev_low + prev_close) / 3.0
+    possible_high_pivot = (2 * pivot_point) - prev_low    # R1 Resistance
+    possible_low_pivot = (2 * pivot_point) - prev_high     # S1 Support
+
+    # ATR-based Expected Range
+    possible_high_atr = current_price + (1.0 * atr)
+    possible_low_atr = max(0, current_price - (1.0 * atr))
+
+    # Combined Intraday Projections (Weighted Average)
+    expected_day_high = (possible_high_pivot + possible_high_atr) / 2
+    expected_day_low = (possible_low_pivot + possible_low_atr) / 2
+
     returns_slice = data_horizon["Close"].pct_change().dropna()
     positive_returns = returns_slice[returns_slice > 0]
     avg_horizon_growth_pct = (positive_returns.mean() * 100) if len(positive_returns) > 0 else 0
@@ -131,19 +154,15 @@ if company:
 
     # SAFE DIP PRICE LOGIC (Enhanced with RSI)
     if rsi > 70:
-        # Overbought: High risk of pullback. Wait for deeper support.
         safe_entry_price = ma50 if current_price > ma50 else bb_lower
         rsi_entry_eval = "Overbought (>70). High risk of immediate pullback. Wait for deeper structural support."
     elif rsi < 30:
-        # Oversold: Price is already stretched downward.
-        safe_entry_price = current_price  # Current price is considered a safe entry
+        safe_entry_price = current_price
         rsi_entry_eval = "Oversold (<30). Price is already stretched downward; excellent momentum for a rebound."
     elif 30 <= rsi <= 45:
-        # Nearing oversold
         safe_entry_price = max(bb_lower, current_price * 0.98)
         rsi_entry_eval = "Approaching Oversold. Good dip entry zone near structural support limits."
-    else: 
-        # Neutral to bullish (45-70)
+    else:
         if current_price > ma20:
             safe_entry_price = ma20
             rsi_entry_eval = "Neutral/Bullish. Entering at the 20-Day MA pullback is the most logical support."
@@ -277,6 +296,17 @@ if company:
 
     st.markdown("---")
 
+    # NEW SECTION: CURRENT DAY POSSIBLE HIGH & LOW
+    st.subheader("📊 Today's Expected Price Range (Current Day High / Low Projections)")
+    h_col1, h_col2, h_col3, h_col4 = st.columns(4)
+    
+    h_col1.metric("Expected Day High", f"₹{expected_day_high:.2f}", f"+{((expected_day_high - current_price)/current_price)*100:.2f}%")
+    h_col2.metric("Expected Day Low", f"₹{expected_day_low:.2f}", f"{((expected_day_low - current_price)/current_price)*100:.2f}%")
+    h_col3.metric("Pivot Point (P)", f"₹{pivot_point:.2f}")
+    h_col4.metric("14-Day ATR Range", f"±₹{atr:.2f}")
+
+    st.markdown("---")
+
     # SAFE ENTRY RECOMMENDATION BOX
     st.subheader("🛡️ Safe Dip Entry & Risk-Free Price Point")
 
@@ -301,7 +331,7 @@ if company:
     st.markdown("---")
 
     # PROFIT FEASIBILITY & HORIZON ADVISORY BOX
-    st.subheader(f"🎯 ₹1,000 Profit Horizon Analysis (₹42,000 Capital)")
+    st.subheader("🎯 ₹1,000 Profit Horizon Analysis (₹42,000 Capital)")
 
     col_a, col_b, col_c = st.columns(3)
     col_a.metric("Capital Allocated", f"₹{investment:,}")
@@ -354,7 +384,6 @@ if company:
     # Interactive Chart with Subplots for RSI
     st.markdown("---")
     
-    # Create subplots: Row 1 for Candlestick + MAs, Row 2 for RSI
     fig = make_subplots(
         rows=2, cols=1, 
         shared_xaxes=True, 
@@ -374,16 +403,20 @@ if company:
     fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["BB_Upper"], mode="lines", name="BB Upper", line=dict(dash='dash', color='gray')), row=1, col=1)
     fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["BB_Lower"], mode="lines", name="BB Lower", line=dict(dash='dash', color='gray')), row=1, col=1)
 
+    # Add Horizontal lines on chart for Expected Day High and Low
+    fig.add_hline(y=expected_day_high, line_dash="dot", line_color="lime", row=1, col=1, 
+                  annotation_text=f"Exp High (₹{expected_day_high:.2f})", annotation_position="top left")
+    fig.add_hline(y=expected_day_low, line_dash="dot", line_color="crimson", row=1, col=1, 
+                  annotation_text=f"Exp Low (₹{expected_day_low:.2f})", annotation_position="bottom left")
+
     # 2. RSI Subplot
     fig.add_trace(go.Scatter(
         x=data_horizon.index, y=data_horizon["RSI"], mode="lines", name="RSI", line=dict(color='purple')
     ), row=2, col=1)
 
-    # Add RSI Overbought/Oversold thresholds
     fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1, annotation_text="Overbought (70)", annotation_position="bottom right")
     fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1, annotation_text="Oversold (30)", annotation_position="top right")
 
-    # Update Layout
     fig.update_layout(
         template="plotly_dark", 
         height=700, 
