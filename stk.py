@@ -32,6 +32,15 @@ st.sidebar.markdown("---")
 st.sidebar.header("💰 Investment Settings")
 investment = st.sidebar.number_input("Capital to Invest (₹)", value=42000, step=1000)
 target_profit = st.sidebar.number_input("Target Profit (₹)", value=1000, step=500)
+
+# Added Profit Mining Options
+st.sidebar.markdown("---")
+st.sidebar.header("⛏️ Profit Mining Options")
+mining_days = st.sidebar.slider(
+    "Max Expected Holding Days", 
+    min_value=1, max_value=252, value=10, step=1, 
+    help="Select how many days you want to hold to see the realistic expected profit."
+)
 st.sidebar.markdown("---")
 
 if company:
@@ -386,9 +395,62 @@ if company:
         else:
             st.write("No recent news stories found for this symbol.")
 
-    # Interactive Chart with Subplots for RSI
     st.markdown("---")
+
+    # ==========================================
+    # 6. PROFIT MINING EXPECTED DAYS MATRIX
+    # ==========================================
+    st.subheader("⛏️ Profit Mining Matrix (Expected Days & Targets)")
     
+    # Calculate realistic profit for the user-selected holding days from the sidebar
+    expected_move_pct_mining = (avg_1day_volatility_pct * 0.5) * mining_days
+    expected_target_price_mining = current_price * (1 + (expected_move_pct_mining / 100))
+    expected_profit_mining = (expected_target_price_mining - current_price) * cmp_shares
+
+    st.info(
+        f"⏳ **Time-Based Mining:** Based on average volatility, if you hold for **{mining_days} expected days**, "
+        f"you can realistically mine an estimated profit of **₹{expected_profit_mining:,.2f}** "
+        f"(Target Price: ₹{expected_target_price_mining:.2f} / +{expected_move_pct_mining:.2f}%)."
+    )
+
+    st.write("📊 **Target-Based Mining (Days Required for Different Profit Levels):**")
+    
+    # Generate multiple target scenarios based on the user's base target profit
+    profit_targets_to_mine = [
+        target_profit * 0.5, 
+        target_profit, 
+        target_profit * 2.5, 
+        target_profit * 5, 
+        target_profit * 10
+    ]
+
+    mining_data = []
+    for pt in profit_targets_to_mine:
+        # CMP Scenario
+        pt_cmp_target = current_price + (pt / cmp_shares) if cmp_shares > 0 else 0
+        pt_cmp_req_move = ((pt_cmp_target - current_price) / current_price) * 100 if current_price > 0 else 0
+        pt_est_days_cmp = int(np.ceil(pt_cmp_req_move / (avg_1day_volatility_pct * 0.5))) if avg_1day_volatility_pct > 0 else 0
+        
+        # Safe Dip Scenario
+        pt_safe_target = safe_entry_price + (pt / safe_shares) if safe_shares > 0 else 0
+        pt_safe_req_move = ((pt_safe_target - safe_entry_price) / safe_entry_price) * 100 if safe_entry_price > 0 else 0
+        pt_est_days_safe = int(np.ceil(pt_safe_req_move / (avg_1day_volatility_pct * 0.5))) if avg_1day_volatility_pct > 0 else 0
+        
+        mining_data.append({
+            "Target Profit (₹)": f"₹{pt:,.0f}",
+            "Required Move %": f"+{pt_cmp_req_move:.2f}%",
+            "Target Price (Current Entry)": f"₹{pt_cmp_target:.2f}",
+            "Expected Days (Current Entry)": f"~{pt_est_days_cmp} Days",
+            "Target Price (Safe Dip)": f"₹{pt_safe_target:.2f}",
+            "Expected Days (Safe Dip)": f"~{pt_est_days_safe} Days",
+        })
+
+    mining_df = pd.DataFrame(mining_data)
+    # Using Streamlit's native dataframe styling for a clean look
+    st.dataframe(mining_df, use_container_width=True, hide_index=True)
+    st.markdown("---")
+
+    # Interactive Chart with Subplots for RSI
     fig = make_subplots(
         rows=2, cols=1, 
         shared_xaxes=True, 
