@@ -28,6 +28,12 @@ timeframe_options = {
 selected_timeframe_label = st.sidebar.selectbox("Select Horizon Target:", list(timeframe_options.keys()), index=1)
 trading_days_count = timeframe_options[selected_timeframe_label]
 
+st.sidebar.markdown("---")
+st.sidebar.header("💰 Investment Settings")
+investment = st.sidebar.number_input("Capital to Invest (₹)", value=42000, step=1000)
+target_profit = st.sidebar.number_input("Target Profit (₹)", value=1000, step=500)
+st.sidebar.markdown("---")
+
 if company:
     search = yf.Search(company, max_results=20)
 
@@ -116,7 +122,7 @@ if company:
     vol_ma20 = float(data_horizon["Vol_MA20"].iloc[-1])
 
     # ==========================================
-    # NEW: CURRENT DAY EXPECTED HIGH & LOW
+    # CURRENT DAY EXPECTED HIGH & LOW
     # ==========================================
     if len(full_data) >= 2:
         prev_high = float(full_data["High"].iloc[-2])
@@ -128,7 +134,7 @@ if company:
     # Pivot Point Method (Classic)
     pivot_point = (prev_high + prev_low + prev_close) / 3.0
     possible_high_pivot = (2 * pivot_point) - prev_low    # R1 Resistance
-    possible_low_pivot = (2 * pivot_point) - prev_high     # S1 Support
+    possible_low_pivot = (2 * pivot_point) - prev_high      # S1 Support
 
     # ATR-based Expected Range
     possible_high_atr = current_price + (1.0 * atr)
@@ -145,12 +151,11 @@ if company:
     # ==========================================
     # SAFE DIP ENTRY & TARGET CALCULATIONS
     # ==========================================
-    investment = 42000
     cmp_shares = int(investment // current_price) if current_price > 0 else 0
     cmp_capital_used = cmp_shares * current_price
 
-    cmp_target_price_1000 = current_price + (1000 / cmp_shares) if cmp_shares > 0 else current_price
-    req_move_pct = ((cmp_target_price_1000 - current_price) / current_price) * 100 if current_price > 0 else 0
+    cmp_target_price = current_price + (target_profit / cmp_shares) if cmp_shares > 0 else current_price
+    req_move_pct = ((cmp_target_price - current_price) / current_price) * 100 if current_price > 0 else 0
 
     # SAFE DIP PRICE LOGIC (Enhanced with RSI)
     if rsi > 70:
@@ -171,7 +176,7 @@ if company:
             rsi_entry_eval = "Neutral. Price is below MA20, lower Bollinger Band provides the next safe entry."
 
     safe_shares = int(investment // safe_entry_price) if safe_entry_price > 0 else cmp_shares
-    safe_target_price_1000 = safe_entry_price + (1000 / safe_shares) if safe_shares > 0 else cmp_target_price_1000
+    safe_target_price = safe_entry_price + (target_profit / safe_shares) if safe_shares > 0 else cmp_target_price
     safe_dip_discount_pct = ((current_price - safe_entry_price) / current_price) * 100
 
     stop_loss_price = max(0, safe_entry_price - (1.5 * atr))
@@ -296,7 +301,7 @@ if company:
 
     st.markdown("---")
 
-    # NEW SECTION: CURRENT DAY POSSIBLE HIGH & LOW
+    # CURRENT DAY POSSIBLE HIGH & LOW
     st.subheader("📊 Today's Expected Price Range (Current Day High / Low Projections)")
     h_col1, h_col2, h_col3, h_col4 = st.columns(4)
     
@@ -313,7 +318,7 @@ if company:
     entry_col1, entry_col2, entry_col3, entry_col4 = st.columns(4)
     entry_col1.metric("Current Price (CMP)", f"₹{current_price:.2f}")
     entry_col2.metric("SAFE DIP BUY PRICE", f"₹{safe_entry_price:.2f}", f"-{safe_dip_discount_pct:.2f}% Dip")
-    entry_col3.metric("Target Exit (₹1,000 Profit)", f"₹{safe_target_price_1000:.2f}")
+    entry_col3.metric(f"Target Exit (₹{target_profit} Profit)", f"₹{safe_target_price:.2f}")
     entry_col4.metric("Strict Stop Loss", f"₹{stop_loss_price:.2f}")
     
     st.caption(f"📈 **RSI Entry Evaluation:** {rsi_entry_eval} (Current RSI: {rsi:.2f})")
@@ -325,29 +330,29 @@ if company:
     else:
         st.info(
             f"💡 **WAIT FOR DIP OR PLACE LIMIT ORDER**: Current Price (₹{current_price:.2f}) is slightly higher than support. "
-            f"Placing a buy limit order near **₹{safe_entry_price:.2f}** gives a safer trade setup to guarantee a **₹1,000 profit**."
+            f"Placing a buy limit order near **₹{safe_entry_price:.2f}** gives a safer trade setup to guarantee a **₹{target_profit} profit**."
         )
 
     st.markdown("---")
 
     # PROFIT FEASIBILITY & HORIZON ADVISORY BOX
-    st.subheader("🎯 ₹1,000 Profit Horizon Analysis (₹42,000 Capital)")
+    st.subheader(f"🎯 ₹{target_profit} Profit Horizon Analysis (₹{investment:,.0f} Capital)")
 
     col_a, col_b, col_c = st.columns(3)
     col_a.metric("Capital Allocated", f"₹{investment:,}")
-    col_b.metric("Required Price Surge", f"+{req_move_pct:.2f}%", f"Target at CMP: ₹{cmp_target_price_1000:.2f}")
+    col_b.metric("Required Price Surge", f"+{req_move_pct:.2f}%", f"Target at CMP: ₹{cmp_target_price:.2f}")
     col_c.metric("Avg Daily Volatility", f"{avg_1day_volatility_pct:.2f}%")
 
     if trading_days_count >= est_days_needed:
         st.success(
             f"✅ **SELECTED HORIZON IS SUFFICIENT!**\n\n"
             f"Your active timeframe ({selected_timeframe_label}) is well suited. Based on daily volatility ({avg_1day_volatility_pct:.2f}%/day), "
-            f"the required **+{req_move_pct:.2f}%** surge for a **₹1,000 profit** is realistic within ~{est_days_needed} trading day(s)."
+            f"the required **+{req_move_pct:.2f}%** surge for a **₹{target_profit} profit** is realistic within ~{est_days_needed} trading day(s)."
         )
     else:
         st.warning(
             f"⚠️ **RECOMMENDATION: INCREASE YOUR TIMEFRAME HORIZON!**\n\n"
-            f"Reaching a ₹1,000 profit from CMP requires a **+{req_move_pct:.2f}%** move. "
+            f"Reaching a ₹{target_profit} profit from CMP requires a **+{req_move_pct:.2f}%** move. "
             f"Because this stock moves ~{avg_1day_volatility_pct:.2f}% per day, **{selected_timeframe_label} is too short**.\n\n"
             f"👉 **Suggested Horizon**: Switch your dropdown to **{recommended_timeframe}** (~{est_days_needed} trading days) or enter at the **Safe Dip Price (₹{safe_entry_price:.2f})**."
         )
