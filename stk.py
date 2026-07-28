@@ -122,7 +122,6 @@ if company:
     full_data["RSI"] = 100 - (100 / (1 + rs))
 
     # Calculate IDEAL historical RSI for this specific stock
-    # We use the 15th percentile of RSI as the historical "bounce" zone
     historical_bounce_rsi = full_data["RSI"].quantile(0.15)
     ideal_rsi_zone = f"{historical_bounce_rsi:.1f} - {historical_bounce_rsi + 10:.1f}"
 
@@ -473,4 +472,37 @@ if company:
     )
     
     st.plotly_chart(fig, use_container_width=True)
+
+    # ==========================================
+    # FINAL TRADE SUMMARY & RISK-REWARD REPORT
+    # ==========================================
+    st.markdown("---")
+    st.header("🎯 Final Trade Summary & Risk-Reward Report")
     
+    tab1, tab2, tab3 = st.tabs(["✅ Advantages (Strengths)", "⚠️ Risk Factors (Threats)", "📊 General RSI Guide"])
+    
+    with tab1:
+        st.success("**Key Strengths for this Stock:**")
+        for reason in trade_reasons:
+            if "✅" in reason:
+                st.write(reason)
+        if not any("✅" in reason for reason in trade_reasons):
+            st.write("No major technical advantages found at the current price level.")
+            
+    with tab2:
+        st.error("**Major Risk Factors:**")
+        for reason in trade_reasons:
+            if "❌" in reason or "⚠️" in reason:
+                st.write(reason)
+        if not any("❌" in reason or "⚠️" in reason for reason in trade_reasons):
+            st.write("No major technical warnings found. Trend looks solid.")
+            
+    with tab3:
+        st.info("**How to interpret RSI (Relative Strength Index) for Delivery Trades:**")
+        st.markdown("""
+        *   **RSI < 30 (Oversold / Extreme Value Zone):** 🟢 **STRONG BUY / DIP ENTRY** – The stock has been heavily sold off. High probability of an immediate technical bounce.
+        *   **RSI 30 - 45 (Approaching Oversold / Value Dip):** 🟢 **GOOD BUY ZONE** – Favorable risk-to-reward ratio. Often the safest zone for delivery entries near support.
+        *   **RSI 45 - 60 (Neutral / Consolidation Zone):** 🟡 **HOLD / WAIT** – Sideways movement. Wait for a clear volume breakout or a dip before committing capital.
+        *   **RSI 60 - 70 (Strong Bullish Momentum Zone):** 🔵 **RIDE THE TREND / ACCUMULATE** – Strong buying momentum. Good for breakout trades, but keep stop-losses tight.
+        *   **RSI > 70 (Overbought / Risk Zone):** 🔴 **DO NOT BUY / TAKE PROFIT** – Extended price action. High chance of profit-booking and a sudden pullback.
+        """)
