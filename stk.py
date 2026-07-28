@@ -6,12 +6,44 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 # Page Configuration
-st.set_page_config(page_title="Advanced Stock Dashboard", page_icon="⚡", layout="wide")
+st.set_page_config(page_title="Advanced Indian Stock Dashboard", page_icon="⚡", layout="wide")
+
+# ==========================
+# CACHED MARKET INDICES
+# ==========================
+@st.cache_data(ttl=300)
+def get_market_indices():
+    try:
+        nifty = yf.Ticker("^NSEI").history(period="5d")
+        bank = yf.Ticker("^NSEBANK").history(period="5d")
+        
+        n_close = nifty['Close'].iloc[-1]
+        n_prev = nifty['Close'].iloc[-2]
+        n_pct = ((n_close - n_prev) / n_prev) * 100
+        
+        b_close = bank['Close'].iloc[-1]
+        b_prev = bank['Close'].iloc[-2]
+        b_pct = ((b_close - b_prev) / b_prev) * 100
+        
+        return n_close, n_pct, b_close, b_pct
+    except:
+        return 0, 0, 0, 0
+
+n_close, n_pct, b_close, b_pct = get_market_indices()
 
 st.title("⚡ Advanced Stock Delivery & Safe Dip Entry Dashboard")
 
+# 1. Market Direction Banner
+st.markdown("### 📈 Overall Market Direction")
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("NIFTY 50", f"{n_close:,.2f}", f"{n_pct:.2f}%")
+m2.metric("BANK NIFTY", f"{b_close:,.2f}", f"{b_pct:.2f}%")
+m3.info("Market Breadth Check: Ensure overall trend supports your entry.")
+st.markdown("---")
+
+
 # ==========================
-# 1. SIDEBAR & SEARCH
+# 2. SIDEBAR & SEARCH
 # ==========================
 st.sidebar.header("🔍 Stock Search & Settings")
 company = st.sidebar.text_input("Enter Company Name", value="Reliance")
@@ -33,7 +65,6 @@ st.sidebar.header("💰 Investment Settings")
 investment = st.sidebar.number_input("Capital to Invest (₹)", value=42000, step=1000)
 target_profit = st.sidebar.number_input("Target Profit (₹)", value=1000, step=500)
 
-# Added Profit Mining Options
 st.sidebar.markdown("---")
 st.sidebar.header("⛏️ Profit Mining Options")
 mining_days = st.sidebar.slider(
@@ -50,7 +81,6 @@ if company:
         st.error("Company not found. Please try another search term.")
         st.stop()
 
-    # Prioritize NSE (.NS) and BSE (.BO) symbols
     indian_quotes = [q for q in search.quotes if str(q.get("symbol", "")).endswith((".NS", ".BO"))]
     other_quotes = [q for q in search.quotes if not str(q.get("symbol", "")).endswith((".NS", ".BO"))]
     sorted_quotes = indian_quotes + other_quotes
@@ -62,11 +92,10 @@ if company:
 
     selected_option = st.sidebar.selectbox("Select Exchange/Stock:", list(options.keys()))
     symbol = options[selected_option]
-
     st.sidebar.success(f"Active Symbol: {symbol}")
 
     # ==========================
-    # 2. DATA PROCESSING & TECHNICALS
+    # 3. DATA PROCESSING & TECHNICALS
     # ==========================
     ticker = yf.Ticker(symbol)
     full_data = ticker.history(period="1y")
@@ -78,10 +107,10 @@ if company:
     if isinstance(full_data.columns, pd.MultiIndex):
         full_data.columns = full_data.columns.get_level_values(0)
 
-    # Technical Indicators
-    full_data["MA20"] = full_data["Close"].rolling(20).mean()
-    full_data["MA50"] = full_data["Close"].rolling(50).mean()
-    full_data["MA100"] = full_data["Close"].rolling(100).mean()
+    # Core Moving Averages (Updated to EMA 20, 50, 200)
+    full_data["EMA20"] = full_data["Close"].ewm(span=20, adjust=False).mean()
+    full_data["EMA50"] = full_data["Close"].ewm(span=50, adjust=False).mean()
+    full_data["EMA200"] = full_data["Close"].ewm(span=200, adjust=False).mean()
     full_data["Vol_MA20"] = full_data["Volume"].rolling(20).mean().fillna(1)
 
     # RSI
@@ -100,9 +129,10 @@ if company:
     full_data["Signal_Line"] = full_data["MACD"].ewm(span=9, adjust=False).mean()
 
     # Bollinger Bands & ATR
+    ma20_simple = full_data["Close"].rolling(20).mean()
     std20 = full_data["Close"].rolling(20).std()
-    full_data["BB_Upper"] = full_data["MA20"] + (std20 * 2)
-    full_data["BB_Lower"] = full_data["MA20"] - (std20 * 2)
+    full_data["BB_Upper"] = ma20_simple + (std20 * 2)
+    full_data["BB_Lower"] = ma20_simple - (std20 * 2)
 
     high_low = full_data["High"] - full_data["Low"]
     high_close = np.abs(full_data["High"] - full_data["Close"].shift())
@@ -110,18 +140,23 @@ if company:
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     full_data["ATR"] = tr.rolling(14).mean().bfill()
 
+    # VWAP (Anchored to the visible dataset)
+    full_data['Typical_Price'] = (full_data['High'] + full_data['Low'] + full_data['Close']) / 3
+    full_data['VWAP'] = (full_data['Typical_Price'] * full_data['Volume']).cumsum() / full_data['Volume'].cumsum()
+
     full_data = full_data.bfill().ffill()
 
-    # Daily Volatility
+    # Support & Resistance Metrics
+    high_52w = full_data["High"].max()
     full_data["Daily_Range_Pct"] = ((full_data["High"] - full_data["Low"]) / full_data["Close"]) * 100
     avg_1day_volatility_pct = float(full_data["Daily_Range_Pct"].tail(20).mean())
 
     # Data Slice for Selected Horizon
     data_horizon = full_data.tail(max(trading_days_count, 5)).copy()
     current_price = float(data_horizon["Close"].iloc[-1])
-    ma20 = float(data_horizon["MA20"].iloc[-1])
-    ma50 = float(data_horizon["MA50"].iloc[-1])
-    ma100 = float(data_horizon["MA100"].iloc[-1])
+    ema20 = float(data_horizon["EMA20"].iloc[-1])
+    ema50 = float(data_horizon["EMA50"].iloc[-1])
+    ema200 = float(data_horizon["EMA200"].iloc[-1])
     bb_lower = float(data_horizon["BB_Lower"].iloc[-1])
     rsi = float(data_horizon["RSI"].iloc[-1])
     macd = float(data_horizon["MACD"].iloc[-1])
@@ -129,10 +164,8 @@ if company:
     atr = float(data_horizon["ATR"].iloc[-1])
     current_vol = float(data_horizon["Volume"].iloc[-1])
     vol_ma20 = float(data_horizon["Vol_MA20"].iloc[-1])
+    current_vwap = float(data_horizon["VWAP"].iloc[-1])
 
-    # ==========================================
-    # CURRENT DAY EXPECTED HIGH & LOW
-    # ==========================================
     if len(full_data) >= 2:
         prev_high = float(full_data["High"].iloc[-2])
         prev_low = float(full_data["Low"].iloc[-2])
@@ -140,163 +173,91 @@ if company:
     else:
         prev_high, prev_low, prev_close = current_price, current_price, current_price
 
-    # Pivot Point Method (Classic)
-    pivot_point = (prev_high + prev_low + prev_close) / 3.0
-    possible_high_pivot = (2 * pivot_point) - prev_low    # R1 Resistance
-    possible_low_pivot = (2 * pivot_point) - prev_high      # S1 Support
+    # Volume Logic Update
+    vol_ratio = current_vol / vol_ma20 if vol_ma20 > 0 else 1
+    if vol_ratio >= 2.0:
+        vol_status = "✅ HIGH VOLUME (Breakout/Strong Signal)"
+        vol_score = 20
+    elif vol_ratio >= 1.2:
+        vol_status = "Above Average Volume"
+        vol_score = 10
+    else:
+        vol_status = "⚠️ Low Volume (Cautious Breakout)"
+        vol_score = 0
 
-    # ATR-based Expected Range
+    # RSI Logic Update
+    if rsi >= 70:
+        rsi_eval = "Strong Trend (>70). Wait for pullbacks to enter."
+        rsi_score = 15
+    elif rsi >= 60:
+        rsi_eval = "Bullish Momentum (>60). Good for riding the trend."
+        rsi_score = 20
+    elif 40 <= rsi < 60:
+        rsi_eval = "Neutral Zone (40-60). Consolidating or sideways."
+        rsi_score = 5
+    elif 30 <= rsi < 40:
+        rsi_eval = "Weak Momentum (<40). Sellers in control."
+        rsi_score = -10
+    else:
+        rsi_eval = "Oversold (<30). Potential for quick bounce, but high risk."
+        rsi_score = 10
+
+    # Trend Logic (EMA 50 & 200)
+    if current_price > ema50 and current_price > ema200:
+        trend_status = "Strong Bullish (Price > 50 & 200 EMA)"
+        trend_score = 20
+    elif ema50 > ema200:
+        trend_status = "Moderate Bullish (50 EMA > 200 EMA)"
+        trend_score = 15
+    else:
+        trend_status = "Bearish Trend"
+        trend_score = -10
+
+    # Current Day Projections (Pivot & ATR)
+    pivot_point = (prev_high + prev_low + prev_close) / 3.0
+    possible_high_pivot = (2 * pivot_point) - prev_low
+    possible_low_pivot = (2 * pivot_point) - prev_high
     possible_high_atr = current_price + (1.0 * atr)
     possible_low_atr = max(0, current_price - (1.0 * atr))
-
-    # Combined Intraday Projections (Weighted Average)
     expected_day_high = (possible_high_pivot + possible_high_atr) / 2
     expected_day_low = (possible_low_pivot + possible_low_atr) / 2
 
-    returns_slice = data_horizon["Close"].pct_change().dropna()
-    positive_returns = returns_slice[returns_slice > 0]
-    avg_horizon_growth_pct = (positive_returns.mean() * 100) if len(positive_returns) > 0 else 0
-
-    # ==========================================
-    # SAFE DIP ENTRY & TARGET CALCULATIONS
-    # ==========================================
+    # SAFE DIP ENTRY CALCULATIONS
     cmp_shares = int(investment // current_price) if current_price > 0 else 0
-    cmp_capital_used = cmp_shares * current_price
-
     cmp_target_price = current_price + (target_profit / cmp_shares) if cmp_shares > 0 else current_price
     req_move_pct = ((cmp_target_price - current_price) / current_price) * 100 if current_price > 0 else 0
 
-    # SAFE DIP PRICE LOGIC (Enhanced with RSI)
+    # Safe Entry based on EMA instead of SMA
     if rsi > 70:
-        safe_entry_price = ma50 if current_price > ma50 else bb_lower
-        rsi_entry_eval = "Overbought (>70). High risk of immediate pullback. Wait for deeper structural support."
+        safe_entry_price = ema20 if current_price > ema20 else ema50
     elif rsi < 30:
         safe_entry_price = current_price
-        rsi_entry_eval = "Oversold (<30). Price is already stretched downward; excellent momentum for a rebound."
-    elif 30 <= rsi <= 45:
-        safe_entry_price = max(bb_lower, current_price * 0.98)
-        rsi_entry_eval = "Approaching Oversold. Good dip entry zone near structural support limits."
     else:
-        if current_price > ma20:
-            safe_entry_price = ma20
-            rsi_entry_eval = "Neutral/Bullish. Entering at the 20-Day MA pullback is the most logical support."
-        else:
-            safe_entry_price = max(bb_lower, current_price * 0.98)
-            rsi_entry_eval = "Neutral. Price is below MA20, lower Bollinger Band provides the next safe entry."
+        safe_entry_price = ema50 if current_price > ema50 else bb_lower
 
     safe_shares = int(investment // safe_entry_price) if safe_entry_price > 0 else cmp_shares
     safe_target_price = safe_entry_price + (target_profit / safe_shares) if safe_shares > 0 else cmp_target_price
     safe_dip_discount_pct = ((current_price - safe_entry_price) / current_price) * 100
-
     stop_loss_price = max(0, safe_entry_price - (1.5 * atr))
 
-    # TIMEFRAME RECOMMENDATION
-    if avg_1day_volatility_pct > 0:
-        est_days_needed = int(np.ceil(req_move_pct / (avg_1day_volatility_pct * 0.5)))
-    else:
-        est_days_needed = 10
+    # MACD Score
+    macd_score = 15 if (macd > signal_line and macd > 0) else 5 if macd > signal_line else -10
+    
+    # VWAP Score
+    vwap_score = 10 if current_price > current_vwap else -5
 
-    if est_days_needed <= 1:
-        recommended_timeframe = "1 Day (Tomorrow Focus)"
-    elif est_days_needed <= 5:
-        recommended_timeframe = "1 Week Focus"
-    elif est_days_needed <= 10:
-        recommended_timeframe = "2 Weeks Focus"
-    elif est_days_needed <= 21:
-        recommended_timeframe = "1 Month Focus"
-    elif est_days_needed <= 63:
-        recommended_timeframe = "3 Months Focus"
-    else:
-        recommended_timeframe = "6 Months / 1 Year Focus"
-
-    # ==========================
-    # 3. NEWS PROCESSING
-    # ==========================
-    news_list = ticker.news
-    bullish_words = ["buy", "profit", "rise", "growth", "boost", "charter", "tender", "expand", "record", "gain"]
-    bearish_words = ["war", "blockade", "cost", "risk", "fall", "decline", "probe", "loss", "penalty", "cut", "crisis", "scam"]
-
-    news_summaries = []
-    bullish_count, bearish_count = 0, 0
-
-    if news_list:
-        for item in news_list[:6]:
-            content = item.get("content", {})
-            title = content.get("title", "") if isinstance(content, dict) else item.get("title", "")
-            summary = content.get("summary", title) if isinstance(content, dict) else title
-            title_lower = str(title).lower() + " " + str(summary).lower()
-
-            is_bullish = any(w in title_lower for w in bullish_words)
-            is_bearish = any(w in title_lower for w in bearish_words)
-
-            if is_bearish and not is_bullish:
-                impact, color = "BEARISH", "red"
-                bearish_count += 1
-            elif is_bullish and not is_bearish:
-                impact, color = "BULLISH", "green"
-                bullish_count += 1
-            else:
-                impact, color = "NEUTRAL", "orange"
-
-            news_summaries.append({"headline": title, "summary": summary, "impact": impact, "color": color})
-
-    # ==========================
-    # 4. TRADE SCORING
-    # ==========================
-    trend_score = 0
-    if current_price > ma20: trend_score += 10
-    if ma20 > ma50: trend_score += 10
-    if ma50 > ma100: trend_score += 10
-
-    rsi_score = 0
-    if 45 <= rsi <= 60:
-        rsi_score = 20
-    elif 30 <= rsi < 45:
-        rsi_score = 15
-    elif 60 < rsi <= 70:
-        rsi_score = 10
-    elif rsi < 30:
-        rsi_score = 15
-    elif 70 < rsi <= 80:
-        rsi_score = -10
-    else:
-        rsi_score = -25
-
-    macd_score = 15 if macd > signal_line else 0
-
-    feasibility_score = 0
-    if avg_1day_volatility_pct > 0:
-        ratio = req_move_pct / avg_1day_volatility_pct
-        if ratio <= 0.6:
-            feasibility_score = 25
-        elif ratio <= 1.0:
-            feasibility_score = 20
-        elif ratio <= 1.5:
-            feasibility_score = 10
-        else:
-            feasibility_score = 0
-
-    volume_score = 10 if current_vol >= vol_ma20 else 5
-
-    if bullish_count > bearish_count:
-        news_score = 10
-    elif bearish_count > bullish_count:
-        news_score = -15
-    else:
-        news_score = 5
-
-    raw_score = trend_score + rsi_score + macd_score + feasibility_score + volume_score + news_score
+    raw_score = trend_score + rsi_score + vol_score + macd_score + vwap_score
     trade_score = int(max(0, min(100, raw_score)))
 
     # ==========================
-    # 5. DASHBOARD UI LAYOUT
+    # 4. DASHBOARD UI LAYOUT
     # ==========================
     st.markdown(f"### Stock: **{symbol}** | Horizon Target: **{selected_timeframe_label}**")
 
     col1, col2, col3, col4, col5 = st.columns(5)
     col1.metric("Current Market Price", f"₹{current_price:.2f}")
-    col2.metric("RSI (14)", f"{rsi:.2f}")
-    col3.metric("MACD Status", "BULLISH" if macd > signal_line else "BEARISH")
+    col2.metric("Volume Analysis", f"{vol_ratio:.1f}x Avg", vol_status)
+    col3.metric("RSI (14)", f"{rsi:.2f}", rsi_eval)
     col4.metric("Trade Score", f"{trade_score}/100")
 
     if trade_score >= 80:
@@ -307,13 +268,24 @@ if company:
         col5.warning("HOLD / NEUTRAL")
     else:
         col5.error("AVOID / HIGH RISK")
+    
+    st.caption(f"**MACD Status:** {'Bullish (Above 0)' if macd > 0 and macd > signal_line else 'Bearish or Weak'}")
+
+    st.markdown("---")
+
+    # SUPPORT & RESISTANCE BOX
+    st.subheader("🧱 Key Support & Resistance Levels")
+    sr1, sr2, sr3, sr4 = st.columns(4)
+    sr1.metric("Previous Day High", f"₹{prev_high:.2f}")
+    sr2.metric("Previous Day Low", f"₹{prev_low:.2f}")
+    sr3.metric("52-Week High", f"₹{high_52w:.2f}")
+    sr4.metric("VWAP (Intraday Bias)", f"₹{current_vwap:.2f}", "Bullish" if current_price > current_vwap else "Bearish")
 
     st.markdown("---")
 
     # CURRENT DAY POSSIBLE HIGH & LOW
-    st.subheader("📊 Today's Expected Price Range (Current Day High / Low Projections)")
+    st.subheader("📊 Today's Expected Price Range")
     h_col1, h_col2, h_col3, h_col4 = st.columns(4)
-    
     h_col1.metric("Expected Day High", f"₹{expected_day_high:.2f}", f"+{((expected_day_high - current_price)/current_price)*100:.2f}%")
     h_col2.metric("Expected Day Low", f"₹{expected_day_low:.2f}", f"{((expected_day_low - current_price)/current_price)*100:.2f}%")
     h_col3.metric("Pivot Point (P)", f"₹{pivot_point:.2f}")
@@ -323,115 +295,75 @@ if company:
 
     # SAFE ENTRY RECOMMENDATION BOX
     st.subheader("🛡️ Safe Dip Entry & Risk-Free Price Point")
-
     entry_col1, entry_col2, entry_col3, entry_col4 = st.columns(4)
     entry_col1.metric("Current Price (CMP)", f"₹{current_price:.2f}")
     entry_col2.metric("SAFE DIP BUY PRICE", f"₹{safe_entry_price:.2f}", f"-{safe_dip_discount_pct:.2f}% Dip")
     entry_col3.metric(f"Target Exit (₹{target_profit} Profit)", f"₹{safe_target_price:.2f}")
     entry_col4.metric("Strict Stop Loss", f"₹{stop_loss_price:.2f}")
-    
-    st.caption(f"📈 **RSI Entry Evaluation:** {rsi_entry_eval} (Current RSI: {rsi:.2f})")
-
-    if current_price <= (safe_entry_price * 1.005):
-        st.success(
-            f"🎯 **PRICE IS AT A SAFE ENTRY POINT!** Current Market Price (₹{current_price:.2f}) is already close to or at the Safe Dip Entry level (₹{safe_entry_price:.2f})."
-        )
-    else:
-        st.info(
-            f"💡 **WAIT FOR DIP OR PLACE LIMIT ORDER**: Current Price (₹{current_price:.2f}) is slightly higher than support. "
-            f"Placing a buy limit order near **₹{safe_entry_price:.2f}** gives a safer trade setup to guarantee a **₹{target_profit} profit**."
-        )
-
-    st.markdown("---")
-
-    # PROFIT FEASIBILITY & HORIZON ADVISORY BOX
-    st.subheader(f"🎯 ₹{target_profit} Profit Horizon Analysis (₹{investment:,.0f} Capital)")
-
-    col_a, col_b, col_c = st.columns(3)
-    col_a.metric("Capital Allocated", f"₹{investment:,}")
-    col_b.metric("Required Price Surge", f"+{req_move_pct:.2f}%", f"Target at CMP: ₹{cmp_target_price:.2f}")
-    col_c.metric("Avg Daily Volatility", f"{avg_1day_volatility_pct:.2f}%")
-
-    if trading_days_count >= est_days_needed:
-        st.success(
-            f"✅ **SELECTED HORIZON IS SUFFICIENT!**\n\n"
-            f"Your active timeframe ({selected_timeframe_label}) is well suited. Based on daily volatility ({avg_1day_volatility_pct:.2f}%/day), "
-            f"the required **+{req_move_pct:.2f}%** surge for a **₹{target_profit} profit** is realistic within ~{est_days_needed} trading day(s)."
-        )
-    else:
-        st.warning(
-            f"⚠️ **RECOMMENDATION: INCREASE YOUR TIMEFRAME HORIZON!**\n\n"
-            f"Reaching a ₹{target_profit} profit from CMP requires a **+{req_move_pct:.2f}%** move. "
-            f"Because this stock moves ~{avg_1day_volatility_pct:.2f}% per day, **{selected_timeframe_label} is too short**.\n\n"
-            f"👉 **Suggested Horizon**: Switch your dropdown to **{recommended_timeframe}** (~{est_days_needed} trading days) or enter at the **Safe Dip Price (₹{safe_entry_price:.2f})**."
-        )
 
     st.markdown("---")
 
     left_col, right_col = st.columns([1.1, 0.9])
-
     with left_col:
-        st.subheader("📊 Key Moving Averages")
+        st.subheader("📊 Key Exponential Moving Averages (EMA)")
+        st.caption("Institutions rely heavily on EMAs for swing and long-term trends.")
         m1, m2, m3 = st.columns(3)
-        m1.metric("MA 20 (1M)", f"₹{ma20:.2f}")
-        m2.metric("MA 50 (2.5M)", f"₹{ma50:.2f}")
-        m3.metric("MA 100 (5M)", f"₹{ma100:.2f}")
+        m1.metric("20 EMA (Short-Term)", f"₹{ema20:.2f}")
+        m2.metric("50 EMA (Swing Trend)", f"₹{ema50:.2f}")
+        m3.metric("200 EMA (Long-Term)", f"₹{ema200:.2f}")
+        st.info(f"Trend Analysis: {trend_status}")
 
     with right_col:
-        st.subheader("📰 News Sentiment & Market Headlines")
-        if bearish_count > bullish_count + 1:
-            st.error(
-                f"⚠️ Outlook: Near-term headwinds from costs/geopolitics may create margin pressure over {selected_timeframe_label}.")
-        elif bullish_count > bearish_count:
-            st.success(
-                f"🚀 Outlook: Strong momentum expected to push prices toward targets during {selected_timeframe_label}.")
+        # TIMEFRAME RECOMMENDATION
+        if avg_1day_volatility_pct > 0:
+            est_days_needed = int(np.ceil(req_move_pct / (avg_1day_volatility_pct * 0.5)))
         else:
-            st.info(f"➡️ Outlook: Sideways-to-mild upward movement expected for {selected_timeframe_label}.")
-
-        if news_summaries:
-            for item in news_summaries:
-                with st.expander(f":{item['color']}[[{item['impact']}]] {item['headline']}"):
-                    st.write(item["summary"])
+            est_days_needed = 10
+            
+        st.subheader(f"🎯 Profit Horizon Advisory")
+        st.write(f"Required Surge: **+{req_move_pct:.2f}%** to hit ₹{target_profit} profit.")
+        if trading_days_count >= est_days_needed:
+            st.success(f"✅ Your active timeframe is well suited. Based on daily volatility ({avg_1day_volatility_pct:.2f}%/day), profit is realistic within ~{est_days_needed} days.")
         else:
-            st.write("No recent news stories found for this symbol.")
+            st.warning(f"⚠️ Recommendation: Increase horizon. Reaching your target requires ~{est_days_needed} days. Current timeframe may be too short.")
 
     st.markdown("---")
 
     # ==========================================
-    # 6. PROFIT MINING EXPECTED DAYS MATRIX
+    # SELECTED TIMEFRAME HISTORICAL ANALYSIS
     # ==========================================
-    st.subheader("⛏️ Profit Mining Matrix (Expected Days & Targets)")
+    st.subheader(f"📅 Historical Performance: {selected_timeframe_label}")
     
-    # Calculate realistic profit for the user-selected holding days from the sidebar
-    expected_move_pct_mining = (avg_1day_volatility_pct * 0.5) * mining_days
-    expected_target_price_mining = current_price * (1 + (expected_move_pct_mining / 100))
-    expected_profit_mining = (expected_target_price_mining - current_price) * cmp_shares
-
-    st.info(
-        f"⏳ **Time-Based Mining:** Based on average volatility, if you hold for **{mining_days} expected days**, "
-        f"you can realistically mine an estimated profit of **₹{expected_profit_mining:,.2f}** "
-        f"(Target Price: ₹{expected_target_price_mining:.2f} / +{expected_move_pct_mining:.2f}%)."
-    )
-
-    st.write("📊 **Target-Based Mining (Days Required for Different Profit Levels):**")
+    period_high = data_horizon["High"].max()
+    period_low = data_horizon["Low"].min()
+    period_mean = data_horizon["Close"].mean()
+    period_median = data_horizon["Close"].median()
+    start_price = float(data_horizon["Close"].iloc[0])
+    end_price = float(data_horizon["Close"].iloc[-1])
+    period_return_pct = ((end_price - start_price) / start_price) * 100
+    avg_period_volume = data_horizon["Volume"].mean()
     
-    # Generate multiple target scenarios based on the user's base target profit
-    profit_targets_to_mine = [
-        target_profit * 0.5, 
-        target_profit, 
-        target_profit * 2.5, 
-        target_profit * 5, 
-        target_profit * 10
-    ]
+    t_col1, t_col2, t_col3, t_col4, t_col5, t_col6 = st.columns(6)
+    t_col1.metric("Period High", f"₹{period_high:.2f}")
+    t_col2.metric("Period Low", f"₹{period_low:.2f}")
+    t_col3.metric("Average Price", f"₹{period_mean:.2f}")
+    t_col4.metric("Median Price", f"₹{period_median:.2f}")
+    t_col5.metric("Period Return", f"₹{end_price:.2f}", f"{period_return_pct:.2f}% over {len(data_horizon)} days")
+    t_col6.metric("Avg Daily Vol", f"{int(avg_period_volume):,}")
 
+    st.markdown("---")
+
+    # ==========================================
+    # PROFIT MINING EXPECTED DAYS MATRIX
+    # ==========================================
+    st.subheader("⛏️ Profit Mining Matrix")
+    profit_targets_to_mine = [target_profit * 0.5, target_profit, target_profit * 2.5, target_profit * 5]
     mining_data = []
     for pt in profit_targets_to_mine:
-        # CMP Scenario
         pt_cmp_target = current_price + (pt / cmp_shares) if cmp_shares > 0 else 0
         pt_cmp_req_move = ((pt_cmp_target - current_price) / current_price) * 100 if current_price > 0 else 0
         pt_est_days_cmp = int(np.ceil(pt_cmp_req_move / (avg_1day_volatility_pct * 0.5))) if avg_1day_volatility_pct > 0 else 0
         
-        # Safe Dip Scenario
         pt_safe_target = safe_entry_price + (pt / safe_shares) if safe_shares > 0 else 0
         pt_safe_req_move = ((pt_safe_target - safe_entry_price) / safe_entry_price) * 100 if safe_entry_price > 0 else 0
         pt_est_days_safe = int(np.ceil(pt_safe_req_move / (avg_1day_volatility_pct * 0.5))) if avg_1day_volatility_pct > 0 else 0
@@ -440,48 +372,18 @@ if company:
             "Target Profit (₹)": f"₹{pt:,.0f}",
             "Required Move %": f"+{pt_cmp_req_move:.2f}%",
             "Target Price (Current Entry)": f"₹{pt_cmp_target:.2f}",
-            "Expected Days (Current Entry)": f"~{pt_est_days_cmp} Days",
+            "Expected Days (Current)": f"~{pt_est_days_cmp} Days",
             "Target Price (Safe Dip)": f"₹{pt_safe_target:.2f}",
             "Expected Days (Safe Dip)": f"~{pt_est_days_safe} Days",
         })
 
     mining_df = pd.DataFrame(mining_data)
-    # Using Streamlit's native dataframe styling for a clean look
     st.dataframe(mining_df, use_container_width=True, hide_index=True)
     st.markdown("---")
 
     # ==========================================
-    # 7. SELECTED TIMEFRAME HISTORICAL ANALYSIS
+    # CHARTING
     # ==========================================
-    st.subheader(f"📅 Historical Performance: {selected_timeframe_label}")
-    st.caption("This data reflects the actual price action strictly within your selected horizon.")
-    
-    # Calculate metrics based strictly on the selected timeframe (data_horizon)
-    period_high = data_horizon["High"].max()
-    period_low = data_horizon["Low"].min()
-    
-    # Calculate return percentage from the start of the timeframe to the current price
-    start_price = float(data_horizon["Close"].iloc[0])
-    end_price = float(data_horizon["Close"].iloc[-1])
-    period_return_pct = ((end_price - start_price) / start_price) * 100
-    
-    # Calculate average volume during this specific timeframe
-    avg_period_volume = data_horizon["Volume"].mean()
-    
-    # Display the metrics in a clean row
-    t_col1, t_col2, t_col3, t_col4 = st.columns(4)
-    t_col1.metric("Period High", f"₹{period_high:.2f}")
-    t_col2.metric("Period Low", f"₹{period_low:.2f}")
-    t_col3.metric(
-        "Period Return", 
-        f"₹{end_price:.2f}", 
-        f"{period_return_pct:.2f}% over {len(data_horizon)} days"
-    )
-    t_col4.metric("Avg Daily Volume", f"{int(avg_period_volume):,}")
-
-    st.markdown("---")
-
-    # Interactive Chart with Subplots for RSI
     fig = make_subplots(
         rows=2, cols=1, 
         shared_xaxes=True, 
@@ -490,34 +392,34 @@ if company:
         subplot_titles=(f"📉 Technical Chart ({selected_timeframe_label})", "RSI (14)")
     )
 
-    # 1. Main Price Chart
     fig.add_trace(go.Candlestick(
         x=data_horizon.index, open=data_horizon["Open"], high=data_horizon["High"],
         low=data_horizon["Low"], close=data_horizon["Close"], name="Price"
     ), row=1, col=1)
     
-    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["MA20"], mode="lines", name="MA20", line=dict(color='blue')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["MA50"], mode="lines", name="MA50", line=dict(color='orange')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["BB_Upper"], mode="lines", name="BB Upper", line=dict(dash='dash', color='gray')), row=1, col=1)
-    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["BB_Lower"], mode="lines", name="BB Lower", line=dict(dash='dash', color='gray')), row=1, col=1)
+    # EMAs and VWAP plotted
+    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["EMA20"], mode="lines", name="EMA 20", line=dict(color='blue', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["EMA50"], mode="lines", name="EMA 50", line=dict(color='orange', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["EMA200"], mode="lines", name="EMA 200", line=dict(color='red', width=1.5)), row=1, col=1)
+    fig.add_trace(go.Scatter(x=data_horizon.index, y=data_horizon["VWAP"], mode="lines", name="VWAP", line=dict(color='yellow', width=2, dash='dot')), row=1, col=1)
 
-    # Add Horizontal lines on chart for Expected Day High and Low
     fig.add_hline(y=expected_day_high, line_dash="dot", line_color="lime", row=1, col=1, 
-                  annotation_text=f"Exp High (₹{expected_day_high:.2f})", annotation_position="top left")
+                  annotation_text=f"Exp High (₹{expected_day_high:.2f})")
     fig.add_hline(y=expected_day_low, line_dash="dot", line_color="crimson", row=1, col=1, 
-                  annotation_text=f"Exp Low (₹{expected_day_low:.2f})", annotation_position="bottom left")
+                  annotation_text=f"Exp Low (₹{expected_day_low:.2f})")
 
-    # 2. RSI Subplot
     fig.add_trace(go.Scatter(
         x=data_horizon.index, y=data_horizon["RSI"], mode="lines", name="RSI", line=dict(color='purple')
     ), row=2, col=1)
 
-    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1, annotation_text="Overbought (70)", annotation_position="bottom right")
-    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1, annotation_text="Oversold (30)", annotation_position="top right")
+    fig.add_hline(y=70, line_dash="dash", line_color="red", row=2, col=1, annotation_text="Overbought (70)")
+    fig.add_hline(y=60, line_dash="dash", line_color="orange", row=2, col=1, annotation_text="Bullish (60)")
+    fig.add_hline(y=40, line_dash="dash", line_color="yellow", row=2, col=1, annotation_text="Weak (40)")
+    fig.add_hline(y=30, line_dash="dash", line_color="green", row=2, col=1, annotation_text="Oversold (30)")
 
     fig.update_layout(
         template="plotly_dark", 
-        height=700, 
+        height=750, 
         xaxis_rangeslider_visible=False,
         xaxis2_rangeslider_visible=False,
         showlegend=True,
