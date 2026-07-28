@@ -450,6 +450,37 @@ if company:
     st.dataframe(mining_df, use_container_width=True, hide_index=True)
     st.markdown("---")
 
+    # ==========================================
+    # 7. SELECTED TIMEFRAME HISTORICAL ANALYSIS
+    # ==========================================
+    st.subheader(f"📅 Historical Performance: {selected_timeframe_label}")
+    st.caption("This data reflects the actual price action strictly within your selected horizon.")
+    
+    # Calculate metrics based strictly on the selected timeframe (data_horizon)
+    period_high = data_horizon["High"].max()
+    period_low = data_horizon["Low"].min()
+    
+    # Calculate return percentage from the start of the timeframe to the current price
+    start_price = float(data_horizon["Close"].iloc[0])
+    end_price = float(data_horizon["Close"].iloc[-1])
+    period_return_pct = ((end_price - start_price) / start_price) * 100
+    
+    # Calculate average volume during this specific timeframe
+    avg_period_volume = data_horizon["Volume"].mean()
+    
+    # Display the metrics in a clean row
+    t_col1, t_col2, t_col3, t_col4 = st.columns(4)
+    t_col1.metric("Period High", f"₹{period_high:.2f}")
+    t_col2.metric("Period Low", f"₹{period_low:.2f}")
+    t_col3.metric(
+        "Period Return", 
+        f"₹{end_price:.2f}", 
+        f"{period_return_pct:.2f}% over {len(data_horizon)} days"
+    )
+    t_col4.metric("Avg Daily Volume", f"{int(avg_period_volume):,}")
+
+    st.markdown("---")
+
     # Interactive Chart with Subplots for RSI
     fig = make_subplots(
         rows=2, cols=1, 
