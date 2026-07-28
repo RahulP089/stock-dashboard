@@ -41,7 +41,6 @@ m2.metric("BANK NIFTY", f"{b_close:,.2f}", f"{b_pct:.2f}%")
 m3.info("Market Breadth Check: Ensure overall trend supports your entry.")
 st.markdown("---")
 
-
 # ==========================
 # 2. SIDEBAR & SEARCH
 # ==========================
@@ -107,7 +106,7 @@ if company:
     if isinstance(full_data.columns, pd.MultiIndex):
         full_data.columns = full_data.columns.get_level_values(0)
 
-    # Core Moving Averages (Updated to EMA 20, 50, 200)
+    # Core Moving Averages
     full_data["EMA20"] = full_data["Close"].ewm(span=20, adjust=False).mean()
     full_data["EMA50"] = full_data["Close"].ewm(span=50, adjust=False).mean()
     full_data["EMA200"] = full_data["Close"].ewm(span=200, adjust=False).mean()
@@ -140,7 +139,7 @@ if company:
     tr = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
     full_data["ATR"] = tr.rolling(14).mean().bfill()
 
-    # VWAP (Anchored to the visible dataset)
+    # VWAP
     full_data['Typical_Price'] = (full_data['High'] + full_data['Low'] + full_data['Close']) / 3
     full_data['VWAP'] = (full_data['Typical_Price'] * full_data['Volume']).cumsum() / full_data['Volume'].cumsum()
 
@@ -173,47 +172,86 @@ if company:
     else:
         prev_high, prev_low, prev_close = current_price, current_price, current_price
 
-    # Volume Logic Update
+    # ==========================
+    # TRADE SCORING & REASONS LOGIC
+    # ==========================
+    trade_reasons = []
+
+    # Volume Logic
     vol_ratio = current_vol / vol_ma20 if vol_ma20 > 0 else 1
     if vol_ratio >= 2.0:
         vol_status = "✅ HIGH VOLUME (Breakout/Strong Signal)"
         vol_score = 20
+        trade_reasons.append(f"✅ **Volume:** Traded {vol_ratio:.1f}x the 20-day average. Institutional participation is highly likely.")
     elif vol_ratio >= 1.2:
-        vol_status = "Above Average Volume"
+        vol_status = "✅ Above Average Volume"
         vol_score = 10
+        trade_reasons.append(f"✅ **Volume:** Above average ({vol_ratio:.1f}x), showing decent accumulation.")
     else:
         vol_status = "⚠️ Low Volume (Cautious Breakout)"
         vol_score = 0
+        trade_reasons.append(f"⚠️ **Volume:** Below average ({vol_ratio:.1f}x). Price movements might lack conviction and fail to hold.")
 
-    # RSI Logic Update
+    # RSI Logic
     if rsi >= 70:
-        rsi_eval = "Strong Trend (>70). Wait for pullbacks to enter."
+        rsi_eval = "⚠️ Strong Trend (>70). Wait for pullbacks."
         rsi_score = 15
+        trade_reasons.append(f"⚠️ **RSI ({rsi:.1f}):** Overbought (>70). The trend is very strong, but prone to a sudden short-term pullback.")
     elif rsi >= 60:
-        rsi_eval = "Bullish Momentum (>60). Good for riding the trend."
+        rsi_eval = "✅ Bullish Momentum (>60)."
         rsi_score = 20
+        trade_reasons.append(f"✅ **RSI ({rsi:.1f}):** Bullish momentum zone (>60). Stock is actively trending upward.")
     elif 40 <= rsi < 60:
-        rsi_eval = "Neutral Zone (40-60). Consolidating or sideways."
+        rsi_eval = "⚠️ Neutral Zone (40-60). Consolidating."
         rsi_score = 5
+        trade_reasons.append(f"⚠️ **RSI ({rsi:.1f}):** Neutral zone. Stock is currently consolidating or moving sideways.")
     elif 30 <= rsi < 40:
-        rsi_eval = "Weak Momentum (<40). Sellers in control."
+        rsi_eval = "❌ Weak Momentum (<40)."
         rsi_score = -10
+        trade_reasons.append(f"❌ **RSI ({rsi:.1f}):** Weak momentum (<40). Sellers are currently in control.")
     else:
-        rsi_eval = "Oversold (<30). Potential for quick bounce, but high risk."
+        rsi_eval = "✅ Oversold (<30). Potential bounce."
         rsi_score = 10
+        trade_reasons.append(f"✅ **RSI ({rsi:.1f}):** Oversold (<30). Stock is heavily discounted, offering a potential rapid value bounce.")
 
     # Trend Logic (EMA 50 & 200)
     if current_price > ema50 and current_price > ema200:
         trend_status = "Strong Bullish (Price > 50 & 200 EMA)"
         trend_score = 20
+        trade_reasons.append("✅ **Trend:** Price is trading above both the 50 EMA and 200 EMA, confirming a long-term bullish uptrend.")
     elif ema50 > ema200:
         trend_status = "Moderate Bullish (50 EMA > 200 EMA)"
         trend_score = 15
+        trade_reasons.append("✅ **Trend:** The 50 EMA is above the 200 EMA (Golden cross structure intact).")
     else:
         trend_status = "Bearish Trend"
         trend_score = -10
+        trade_reasons.append("❌ **Trend:** Price is below major EMAs, indicating a macro bearish trend.")
 
-    # Current Day Projections (Pivot & ATR)
+    # MACD Score
+    if macd > signal_line and macd > 0:
+        macd_score = 15
+        trade_reasons.append("✅ **MACD:** Bullish crossover and trending above the zero line.")
+    elif macd > signal_line:
+        macd_score = 5
+        trade_reasons.append("✅ **MACD:** Triggered a bullish crossover, but still recovering below zero.")
+    else:
+        macd_score = -10
+        trade_reasons.append("❌ **MACD:** Bearish momentum (trading below the signal line).")
+    
+    # VWAP Score
+    if current_price > current_vwap:
+        vwap_score = 10
+        trade_reasons.append("✅ **Intraday Bias:** Price closed above the VWAP, indicating strong intraday buying pressure.")
+    else:
+        vwap_score = -5
+        trade_reasons.append("❌ **Intraday Bias:** Price closed below VWAP, indicating intraday sellers pushed it down.")
+
+    # Final Score Calculation
+    raw_score = trend_score + rsi_score + vol_score + macd_score + vwap_score
+    trade_score = int(max(0, min(100, raw_score)))
+
+    # Current Day Projections
     pivot_point = (prev_high + prev_low + prev_close) / 3.0
     possible_high_pivot = (2 * pivot_point) - prev_low
     possible_low_pivot = (2 * pivot_point) - prev_high
@@ -227,7 +265,6 @@ if company:
     cmp_target_price = current_price + (target_profit / cmp_shares) if cmp_shares > 0 else current_price
     req_move_pct = ((cmp_target_price - current_price) / current_price) * 100 if current_price > 0 else 0
 
-    # Safe Entry based on EMA instead of SMA
     if rsi > 70:
         safe_entry_price = ema20 if current_price > ema20 else ema50
     elif rsi < 30:
@@ -240,25 +277,22 @@ if company:
     safe_dip_discount_pct = ((current_price - safe_entry_price) / current_price) * 100
     stop_loss_price = max(0, safe_entry_price - (1.5 * atr))
 
-    # MACD Score
-    macd_score = 15 if (macd > signal_line and macd > 0) else 5 if macd > signal_line else -10
-    
-    # VWAP Score
-    vwap_score = 10 if current_price > current_vwap else -5
-
-    raw_score = trend_score + rsi_score + vol_score + macd_score + vwap_score
-    trade_score = int(max(0, min(100, raw_score)))
-
     # ==========================
     # 4. DASHBOARD UI LAYOUT
     # ==========================
     st.markdown(f"### Stock: **{symbol}** | Horizon Target: **{selected_timeframe_label}**")
 
     col1, col2, col3, col4, col5 = st.columns(5)
+    
+    # metrics without text in the delta field
     col1.metric("Current Market Price", f"₹{current_price:.2f}")
-    col2.metric("Volume Analysis", f"{vol_ratio:.1f}x Avg", vol_status)
-    col3.metric("RSI (14)", f"{rsi:.2f}", rsi_eval)
+    col2.metric("Volume Analysis", f"{vol_ratio:.1f}x Avg")
+    col3.metric("RSI (14)", f"{rsi:.2f}")
     col4.metric("Trade Score", f"{trade_score}/100")
+
+    # Text placed directly below the metric to avoid the green arrow bug
+    col2.caption(vol_status)
+    col3.caption(rsi_eval)
 
     if trade_score >= 80:
         col5.success("EXCELLENT BUY")
@@ -270,6 +304,12 @@ if company:
         col5.error("AVOID / HIGH RISK")
     
     st.caption(f"**MACD Status:** {'Bullish (Above 0)' if macd > 0 and macd > signal_line else 'Bearish or Weak'}")
+    
+    # NEW REASONS EXPANDER
+    with st.expander("📝 **Why did it get this score? (Trade Rationale Breakdown)**", expanded=True):
+        st.write("Here is the detailed technical breakdown driving this recommendation based on core Indian market strategies:")
+        for reason in trade_reasons:
+            st.write(reason)
 
     st.markdown("---")
 
