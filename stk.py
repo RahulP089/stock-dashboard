@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 st.set_page_config(page_title="Institutional Stock Terminal", page_icon="⚡", layout="wide")
 
 # ==========================
-# CUSTOM UI STYLING (Terminal UI)
+# CUSTOM UI STYLING (Clean Border Look, No Grey Shade)
 # ==========================
 st.markdown("""
     <style>
@@ -18,8 +18,8 @@ st.markdown("""
             padding-bottom: 2rem;
         }
         div[data-testid="stMetric"] {
-            background-color: rgba(15, 23, 42, 0.6);
-            border: 1px solid rgba(255, 255, 255, 0.08);
+            background-color: transparent;
+            border: 1px solid rgba(255, 255, 255, 0.12);
             padding: 10px 14px;
             border-radius: 8px;
         }
