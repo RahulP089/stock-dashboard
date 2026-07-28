@@ -121,6 +121,11 @@ if company:
     rs = avg_gain / (avg_loss.replace(0, 0.00001))
     full_data["RSI"] = 100 - (100 / (1 + rs))
 
+    # Calculate IDEAL historical RSI for this specific stock
+    # We use the 15th percentile of RSI as the historical "bounce" zone
+    historical_bounce_rsi = full_data["RSI"].quantile(0.15)
+    ideal_rsi_zone = f"{historical_bounce_rsi:.1f} - {historical_bounce_rsi + 10:.1f}"
+
     # MACD
     ema12 = full_data["Close"].ewm(span=12, adjust=False).mean()
     ema26 = full_data["Close"].ewm(span=26, adjust=False).mean()
@@ -284,13 +289,11 @@ if company:
 
     col1, col2, col3, col4, col5 = st.columns(5)
     
-    # metrics without text in the delta field
     col1.metric("Current Market Price", f"₹{current_price:.2f}")
     col2.metric("Volume Analysis", f"{vol_ratio:.1f}x Avg")
     col3.metric("RSI (14)", f"{rsi:.2f}")
     col4.metric("Trade Score", f"{trade_score}/100")
 
-    # Text placed directly below the metric to avoid the green arrow bug
     col2.caption(vol_status)
     col3.caption(rsi_eval)
 
@@ -305,7 +308,6 @@ if company:
     
     st.caption(f"**MACD Status:** {'Bullish (Above 0)' if macd > 0 and macd > signal_line else 'Bearish or Weak'}")
     
-    # NEW REASONS EXPANDER
     with st.expander("📝 **Why did it get this score? (Trade Rationale Breakdown)**", expanded=True):
         st.write("Here is the detailed technical breakdown driving this recommendation based on core Indian market strategies:")
         for reason in trade_reasons:
@@ -335,11 +337,15 @@ if company:
 
     # SAFE ENTRY RECOMMENDATION BOX
     st.subheader("🛡️ Safe Dip Entry & Risk-Free Price Point")
-    entry_col1, entry_col2, entry_col3, entry_col4 = st.columns(4)
+    entry_col1, entry_col2, entry_col3, entry_col4, entry_col5 = st.columns(5)
+    
     entry_col1.metric("Current Price (CMP)", f"₹{current_price:.2f}")
     entry_col2.metric("SAFE DIP BUY PRICE", f"₹{safe_entry_price:.2f}", f"-{safe_dip_discount_pct:.2f}% Dip")
     entry_col3.metric(f"Target Exit (₹{target_profit} Profit)", f"₹{safe_target_price:.2f}")
     entry_col4.metric("Strict Stop Loss", f"₹{stop_loss_price:.2f}")
+    
+    # NEW IDEAL RSI METRIC
+    entry_col5.metric("Ideal Historical Entry RSI", ideal_rsi_zone)
 
     st.markdown("---")
 
@@ -467,3 +473,4 @@ if company:
     )
     
     st.plotly_chart(fig, use_container_width=True)
+    
